@@ -52,6 +52,40 @@ async def _challenge_meta(fr) -> dict:
     return await fr.evaluate(_CHALLENGE_META_JS)
 
 
+async def _dom_summary(fr, limit: int = 700) -> str:
+    """One-line shape of the challenge frame, logged when canvas detection fails.
+
+    hCaptcha has shipped layouts that render tiles as background images instead of a
+    single <canvas>; without this the failure is just "no canvas" with no way to tell
+    which layout was served.
+    """
+    try:
+        return await fr.evaluate("""(limit) => {
+            const all = [...document.querySelectorAll('*')];
+            const tags = {};
+            for (const el of all) {
+                let k = el.tagName.toLowerCase();
+                if (el.className && typeof el.className === 'string') {
+                    k += '.' + el.className.trim().split(/\\s+/).slice(0, 3).join('.');
+                }
+                tags[k] = (tags[k] || 0) + 1;
+            }
+            const top = Object.entries(tags).sort((a, b) => b[1] - a[1])
+                .slice(0, 12).map(([k, v]) => k + ' x' + v).join(' | ');
+            const bg = all.filter(e => getComputedStyle(e).backgroundImage !== 'none').length;
+            const task = [...document.querySelectorAll('.text')]
+                .map(e => (e.innerText || '').trim().slice(0, 90)).filter(Boolean).join(' / ');
+            const opts = [...document.querySelectorAll('.option')].slice(0, 6)
+                .map(e => (e.innerText || '').trim().slice(0, 30));
+            return ('imgs=' + document.images.length + ' bgimg=' + bg
+                + ' task=' + JSON.stringify(task.slice(0, 160))
+                + ' opts=' + JSON.stringify(opts)
+                + ' :: ' + top).slice(0, limit);
+        }""", limit)
+    except Exception as e:
+        return f"dump failed: {type(e).__name__}: {e}"
+
+
 async def _get_canvas_b64(fr) -> str:
     """Get the full canvas as a base64-encoded PNG data URL."""
     return await fr.evaluate("""() => {
@@ -226,7 +260,7 @@ async def solve_hcaptcha_challenge(fr, page, keypool, max_pages: int = 5) -> boo
     """
     meta = await _challenge_meta(fr)
     if not meta.get("canvasRect"):
-        log.info("no challenge canvas found")
+        log.warning("no challenge canvas found | dom=%s", await _dom_summary(fr))
         return False
     if meta.get("isDrag"):
         log.warning("drag challenge — best-effort via grid")

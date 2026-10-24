@@ -12,6 +12,8 @@ Sync + stdlib only (urllib) — call from async via asyncio.to_thread.
 import itertools
 import json
 import logging
+import os
+import re
 import threading
 import time
 import urllib.error
@@ -20,7 +22,24 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_ENDPOINT = "https://api.mistral.ai/v1/chat/completions"
+# Any OpenAI-compatible vision endpoint works, not just api.mistral.ai: set
+# VISION_API_BASE to point the pool at a gateway/self-hosted server.
+_DEFAULT_BASE = "https://api.mistral.ai/v1"
+
+
+def _endpoint() -> str:
+    return os.environ.get("VISION_API_BASE", _DEFAULT_BASE).rstrip("/") + "/chat/completions"
+
+
+# Some gateways append a promo/footer block to every answer ("Free AI access by …",
+# "resold? report it …"). Left in, those lines leak into grid parsing and get read as
+# cell numbers, so strip them before anything downstream sees the text.
+_AD_LINE = re.compile(r"(?i)(free ai access|rdhx|resold|discord:\s*@)")
+
+
+def _clean(txt: str) -> str:
+    lines = [ln for ln in (txt or "").splitlines() if not _AD_LINE.search(ln)]
+    return "\n".join(lines).strip().lower()
 # pixtral-12b aliases to a text model on this gateway; medium is the cheapest id
 # that actually does vision here.
 _DEFAULT_MODEL = "mistral-medium-latest"
@@ -32,7 +51,16 @@ _COOLDOWN_S = 60  # wall-clock park duration for a failed key
 class KeyPool:
     def __init__(self, keyfile: str, model: str = _DEFAULT_MODEL,
                  start_index: int = 0):
-        keys = [k.strip() for k in Path(keyfile).read_text().splitlines() if k.strip()]
+        # A single key via env wins over the key file, so a gateway deployment can run
+        # with no apikey.txt at all (one gateway key, not a pool of Mistral keys).
+        env_key = os.environ.get("VISION_API_KEY", "").strip()
+        if env_key:
+            keys = [env_key]
+        elif Path(keyfile).exists():
+            keys = [k.strip() for k in Path(keyfile).read_text().splitlines() if k.strip()]
+        else:
+            raise ValueError(
+                f"no vision keys: set VISION_API_KEY or provide {keyfile}")
         # dedupe, preserve order
         seen = set()
         self.keys = [k for k in keys if not (k in seen or seen.add(k))]
@@ -81,7 +109,7 @@ class KeyPool:
         for _ in range(min(max_keys, len(self.keys))):
             key = self._next_live_key()
             req = urllib.request.Request(
-                _ENDPOINT, data=body,
+                _endpoint(), data=body,
                 headers={"Content-Type": "application/json",
                          "Authorization": "Bearer " + key})
             try:
@@ -90,7 +118,7 @@ class KeyPool:
                 txt = data["choices"][0]["message"]["content"]
                 if isinstance(txt, list):
                     txt = ' '.join(p.get('text', '') for p in txt if isinstance(p, dict))
-                return txt.strip().lower()
+                return _clean(txt)
             except urllib.error.HTTPError as e:
                 last_err = f"HTTP {e.code}"
                 if e.code in _ROTATE_STATUS:

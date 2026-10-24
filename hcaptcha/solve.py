@@ -76,28 +76,45 @@ def _browser_kwargs(proxy: str = None) -> dict:
 # ── Token harvest ─────────────────────────────────────────────────────
 
 async def _get_hcaptcha_token(page, max_attempts: int = 30) -> str:
-    """Poll [name=h-captcha-response] + hcaptcha.getResponse() for token."""
+    """Poll [name=h-captcha-response] + hcaptcha.getResponse() for a real token.
+
+    Only STRING values are accepted: getResponse() on some pages (stubs, mock
+    widgets) returns an object, which used to be str()'d into the literal
+    "[object Object]" and then reported as a successful solve.
+    """
     for _ in range(max_attempts):
         # Check DOM first
         try:
             token = await page.evaluate(
-                "() => (document.querySelector('[name=h-captcha-response]') || {}).value || ''"
+                "() => { const el = document.querySelector('[name=h-captcha-response]');"
+                " return (el && typeof el.value === 'string') ? el.value : ''; }"
             )
-            if token:
+            if _token_ok(token):
                 return token
         except Exception:
             pass
         # Check via hcaptcha.getResponse()
         try:
             token = await page.evaluate(
-                "() => { try { return hcaptcha.getResponse() || ''; } catch(e) { return ''; } }"
+                "() => { try { const r = hcaptcha.getResponse();"
+                " return typeof r === 'string' ? r : ''; } catch(e) { return ''; } }"
             )
-            if token:
+            if _token_ok(token):
                 return token
         except Exception:
             pass
         await asyncio.sleep(1)
     return ""
+
+
+def _token_ok(t) -> bool:
+    """A harvested token must look like a real hCaptcha response."""
+    if not isinstance(t, str):
+        return False
+    t = t.strip()
+    if len(t) < 20 or t.startswith("[object") or " " in t:
+        return False
+    return True
 
 
 async def _click_hcaptcha_checkbox(page, attempts: int = 20) -> bool:
