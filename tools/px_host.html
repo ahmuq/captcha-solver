@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>PX Host</title>
+<style>html,body{margin:0;height:100%;background:#fff}
+iframe{width:100%;height:100%;border:0}</style></head><body>
+<iframe id="ch" src="__CHALLENGE__"></iframe>
+<script>
+var f = document.getElementById('ch');
+function report(o) {
+  try { fetch('/ev', {method:'POST', body: JSON.stringify(o)}); } catch (e) {}
+}
+window.addEventListener('message', function (e) {
+  report({kind:'msg', data: e.data});
+});
+f.addEventListener('load', function () {
+  report({kind:'iframe-loaded'});
+  setTimeout(function () {
+    var msg = {
+      type: 'block',
+      jsonResponse: {vid: __VID__, uuid: __UUID__},
+      requestUrl: 'https://signup.live.com/api/v1.0/risk/verify'
+    };
+    report({kind:'sending-block', data: msg});
+    try { f.contentWindow.postMessage(msg, '*'); } catch (e) {}
+    setTimeout(function () {
+      try { f.contentWindow.postMessage({type:'setToWindow', key:'_pxVid', value: __VID__}, '*'); } catch (e) {}
+    }, 1200);
+    setTimeout(function () {
+      try { f.contentWindow.postMessage({type:'setToWindow', key:'_pxUuid', value: __UUID__}, '*'); } catch (e) {}
+    }, 1500);
+  }, 2500);
+});
+</script></body></html>

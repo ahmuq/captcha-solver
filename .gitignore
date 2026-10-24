@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Artifacts
+.pytest_cache/
+*.log
+
+# Credentials
+.env
+.env.*
+!.env.example
+.solver-token.env
+.solver-admin.json
+.solver-sessions.json
+# Scratch variants used by tools/smoke_dashboard.py and manual verification.
+.tmp-*admin*.json
+.tmp-*sessions*.json
+.tmp-*.py
+apikey.txt
+**/apikey.txt
+
+# Frontend
+node_modules/
+web/ui/dist/
+
+# Local-only
+tests/
+AGENTS.md
+CLAUDE.md
+.kiro/
+# Xvfb auth cookie written by start-xvfb.sh / the xvfb unit
+.cache/
+# Local binary pin sidecar (machine-specific; not published)
+.cloakbrowser-pin
+# ONNX models (downloaded from HuggingFace, ~1.4GB)
+arkose/models/

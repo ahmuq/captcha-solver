@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>PX Host</title>
+<style>html,body{margin:0;height:100%;background:#fff;overflow:hidden}
+iframe{width:100%;height:100%;border:0}</style></head><body>
+<iframe id="ch" src="__CHALLENGE__"></iframe>
+<script>
+// Wrapper ini meniru peran parent asli (Microsoft signup). Halaman challenge PX
+// memuat captcha.js — yang merender tombol press-and-hold — HANYA setelah parent
+// mengirim postMessage {type:"block", jsonResponse:{uuid,vid}}. Tanpa pesan itu
+// #px-captcha tetap kosong dan halaman tampak blank (terbukti terukur).
+//
+// Halaman challenge juga mengirim balik cookie lewat
+//   parent.postMessage({type:"cookie", name, value, expires}, "*")
+// sehingga _px3 bisa dipanen real-time tanpa perlu relaunch CDP.
+var f = document.getElementById('ch');
+function report(o) {
+  try { fetch('/ev', {method:'POST', body: JSON.stringify(o)}); } catch (e) {}
+}
+var BLOCK = {
+  type: 'block',
+  jsonResponse: {vid: __VID__, uuid: __UUID__},
+  requestUrl: 'https://signup.live.com/api/v1.0/risk/verify'
+};
+var sent = 0, rendered = false;
+function sendBlock() {
+  // Kirim "block" SEKALI saja. Setiap "block" memicu PX memuat ulang captcha.js
+  // (case "block": d(...) -> i("captcha")), dan mengirimnya berulang membatalkan
+  // render yang sedang berjalan. Terukur: sesi gagal render memuat captcha.js 8-12x
+  // dan melaporkan captchaNotRendered; sesi yang berhasil memuatnya 1x.
+  if (rendered || sent >= 3) return;
+  sent++;
+  try { f.contentWindow.postMessage(BLOCK, '*'); } catch (e) {}
+  report({kind: 'block-sent', n: sent});
+}
+function setVars() {
+  try {
+    f.contentWindow.postMessage({type:'setToWindow', key:'_pxVid', value: __VID__}, '*');
+    f.contentWindow.postMessage({type:'setToWindow', key:'_pxUuid', value: __UUID__}, '*');
+  } catch (e) {}
+}
+window.addEventListener('message', function (e) {
+  report({kind: 'msg', data: e.data});
+  // "rendered" menandakan captcha.js sudah dimuat dan tombol dirender.
+  if (e.data && e.data.type === 'rendered') { rendered = true; }
+});
+// UA browser ini harus dilaporkan: _px3 terikat ke UA + _pxvid + IP, jadi caller
+// (bot Go) harus me-replay dengan UA yang PERSIS sama. Tanpa ini caller memakai UA-nya
+// sendiri, _px3 tidak cocok, dan Microsoft mengembalikan riskChallengeRequired lagi.
+report({kind: 'ua', value: navigator.userAgent});
+f.addEventListener('load', function () {
+  report({kind: 'iframe-loaded'});
+  setTimeout(sendBlock, 2000);
+  setTimeout(setVars, 3200);
+  // Fallback saja: kalau "rendered" belum datang, coba sekali lagi di 12s / 20s.
+  setTimeout(function () { if (!rendered) { sendBlock(); setVars(); } }, 12000);
+  setTimeout(function () { if (!rendered) { sendBlock(); setVars(); } }, 20000);
+});
+</script></body></html>
